@@ -20,6 +20,10 @@ from omnigen2.schedulers.scheduling_flow_match_euler_discrete import FlowMatchEu
 from omnigen2.schedulers.scheduling_dpmsolver_multistep import DPMSolverMultistepScheduler
 from omnigen2.utils.img_util import create_collage
 
+from transformers.modeling_utils import no_init_weights
+from dfloat11 import DFloat11Model
+
+
 NEGATIVE_PROMPT = "(((deformed))), blurry, over saturation, bad anatomy, disfigured, poorly drawn face, mutation, mutated, (extra_limb), (ugly), (poorly drawn hands), fused fingers, messy drawing, broken legs censor, censored, censor_bar"
 ROOT_DIR = os.path.dirname(os.path.abspath(__file__))
 
@@ -34,10 +38,36 @@ def load_pipeline(accelerator, weight_dtype, args):
         torch_dtype=weight_dtype,
         trust_remote_code=True,
     )
-    pipeline.transformer = OmniGen2Transformer2DModel.from_pretrained(
-        args.model_path,
-        subfolder="transformer",
-        torch_dtype=weight_dtype,
+    DFloat11Model.from_pretrained(
+        "DFloat11/OmniGen2-mllm-DF11",
+        device="cpu",
+        bfloat16_model=pipeline.mllm,
+    )
+
+    cfg = {
+        "patch_size": 2,
+        "in_channels": 16,
+        "out_channels": None,
+        "hidden_size": 2520,
+        "num_layers": 32,
+        "num_refiner_layers": 2,
+        "num_attention_heads": 21,
+        "num_kv_heads": 7,
+        "multiple_of": 256,
+        "ffn_dim_multiplier": None,
+        "norm_eps": 1e-5,
+        "axes_dim_rope": (40, 40, 40),
+        "axes_lens": (1024, 1664, 1664),
+        "text_feat_dim": 2048,
+        "timestep_scale": 1000.0,
+    }
+    with no_init_weights():
+        pipeline.transformer = OmniGen2Transformer2DModel(**cfg).to(torch.bfloat16)
+
+    DFloat11Model.from_pretrained(
+        "DFloat11/OmniGen2-transformer-DF11",
+        device="cpu",
+        bfloat16_model=pipeline.transformer,
     )
     if args.enable_sequential_cpu_offload:
         pipeline.enable_sequential_cpu_offload()

@@ -17,6 +17,9 @@ from diffusers.hooks import apply_group_offloading
 from omnigen2.pipelines.omnigen2.pipeline_omnigen2_chat import OmniGen2ChatPipeline
 from omnigen2.models.transformers.transformer_omnigen2 import OmniGen2Transformer2DModel
 
+from transformers.modeling_utils import no_init_weights
+from dfloat11 import DFloat11Model
+
 
 def parse_args() -> argparse.Namespace:
     """Parse command line arguments."""
@@ -26,6 +29,13 @@ def parse_args() -> argparse.Namespace:
         type=str,
         required=True,
         help="Path to model checkpoint.",
+    )
+    parser.add_argument(
+        "--scheduler",
+        type=str,
+        default="euler",
+        choices=["euler", "dpmsolver"],
+        help="Scheduler to use.",
     )
     parser.add_argument(
         "--num_inference_step",
@@ -142,10 +152,36 @@ def load_pipeline(args: argparse.Namespace, accelerator: Accelerator, weight_dty
         torch_dtype=weight_dtype,
         trust_remote_code=True,
     )
-    pipeline.transformer = OmniGen2Transformer2DModel.from_pretrained(
-        args.model_path,
-        subfolder="transformer",
-        torch_dtype=weight_dtype,
+    DFloat11Model.from_pretrained(
+        "DFloat11/OmniGen2-mllm-DF11",
+        device="cpu",
+        bfloat16_model=pipeline.mllm,
+    )
+
+    cfg = {
+        "patch_size": 2,
+        "in_channels": 16,
+        "out_channels": None,
+        "hidden_size": 2520,
+        "num_layers": 32,
+        "num_refiner_layers": 2,
+        "num_attention_heads": 21,
+        "num_kv_heads": 7,
+        "multiple_of": 256,
+        "ffn_dim_multiplier": None,
+        "norm_eps": 1e-5,
+        "axes_dim_rope": (40, 40, 40),
+        "axes_lens": (1024, 1664, 1664),
+        "text_feat_dim": 2048,
+        "timestep_scale": 1000.0,
+    }
+    with no_init_weights():
+        pipeline.transformer = OmniGen2Transformer2DModel(**cfg).to(torch.bfloat16)
+
+    DFloat11Model.from_pretrained(
+        "DFloat11/OmniGen2-transformer-DF11",
+        device="cpu",
+        bfloat16_model=pipeline.transformer,
     )
     if args.scheduler == "dpmsolver":
         from omnigen2.schedulers.scheduling_dpmsolver_multistep import DPMSolverMultistepScheduler
