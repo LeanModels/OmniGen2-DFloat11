@@ -16,3 +16,4 @@ python-dotenv
 ninja
 ipykernel
 dfloat11[cuda12]
+python-dotenv
